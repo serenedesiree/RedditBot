@@ -1,0 +1,157 @@
+import praw
+import requests
+import json
+import pySQL
+import psycopg2
+
+# Establishing a connection to the SQL database via psycopg2
+
+connection = psycopg2.connect(user='username',
+                              password='password',
+                              port='5433',
+                              # if using a web service,
+                              # host link will be provided
+                              host='127.0.0.1',
+                              database='psycho')
+
+cursor = connection.cursor()
+
+
+class user_class():
+
+    def __init__(self, u, o, c, e, a, n):
+        self.u = u.lower()
+        self.o = o
+        self.c = c
+        self.e = e
+        self.a = a
+        self.n = n
+
+    # inserts Watson's data into database
+    def insert_personality(self):
+        try:
+            cursor.execute('SELECT VERSION();')
+            cursor.execute('SELECT * FROM redditpsychometrics')
+            cursor.execute('''INSERT INTO
+                           redditpsychometrics(wopenness,
+                           wconscientiousness, wextraversion,
+                           wagreeableness, wneuroticism, username)
+                           VALUES ( {}, {}, {}, {}, {}, '{}')
+                           ON CONFLICT DO NOTHING;'''.format(self.o,
+                           self.c, self.e, self.a, self.n, self.u))
+            connection.commit()
+
+        except (Exception, psycopg2.Error) as error:
+            return error
+
+    def usercheck(self):
+        cursor.execute('''SELECT username FROM redditpsychometrics
+                      WHERE username = '{}'  '''.format(self.u))
+        retrieval = cursor.fetchall()
+        return retrieval
+
+    def close():
+        if (connection):
+            cursor.close()
+            connection.close()
+
+# Necessary if using AWS:
+def handler(event, context):
+    main
+
+
+# analyze is a function that takes a username and sends it to Watson's API to
+# be analyzed.
+    def analyze(username):
+        try:
+            headers = {
+                    'Content-Type': 'text/plain;charset=utf-8',
+                    'Accept': 'application/json',
+                      }
+
+            data = username.encode('utf-8')
+            response = requests.post('watson api',
+                                     headers=headers, data=data,
+                                     auth=('apikey', 'apikey'))
+            a = response.text
+            print(a)
+            return(a)
+        except Exception:
+            print(Exception)
+
+    comment = praw.models.Comment
+
+# logs onto Reddit bot's account through praw's api
+    reddit = praw.Reddit(client_id='',
+                         client_secret='',
+                         user_agent='',
+                         password='',
+                         username='')
+
+    # checks last 1000 comments from a username and collates them
+    def comment_checker(username):
+        all_comments = ''
+        user = reddit.redditor(str(username))
+        for com in user.comments.new(limit=None):
+            individual_comment = com.body
+            all_comments += individual_comment
+        return(all_comments)
+
+    # scrape all comments from the 25 newest comments in a subreddit
+    for sub in reddit.subreddit('testingground4bots').new('limit=25'):
+
+        sub.comments.replace_more()
+        comment_queue = sub.comments[:]  # Seed with top-level
+        while comment_queue:
+            comment = comment_queue.pop(0)
+            comment_queue.extend(comment.replies)
+            searchedphrase = comment.body.lower()
+            if '!analyzeme' in searchedphrase:
+                check = comment_checker(comment.author)
+                d = analyze(check)
+                a = json.loads(d)
+                dictionary = {}
+                try:
+                    for item in a['personality']:
+
+                        percentile = str(item['percentile'])
+                        trait = str(item['trait_id'])
+                        if 'conscientiousness' in trait:
+                            trait = 'Conscientiousness'
+                        if 'neuroticism' in trait:
+                            trait = 'Neuroticism'
+                        if 'extraversion' in trait:
+                            trait = 'Extraversion'
+                        if 'agreeableness' in trait:
+                            trait = 'Agreeableness'
+                        if 'openness' in trait:
+                            trait = 'Openness'
+                        dictionary[trait] = percentile
+                    author = comment.author
+
+                    py = user_class(str(author), dictionary['Openness'],
+                                    dictionary['Conscientiousness'],
+                                    dictionary['Extraversion'],
+                                    dictionary['Agreeableness'],
+                                    dictionary['Neuroticism'])
+
+                    if py.usercheck() == []:
+                        print(str(py.usercheck))
+                        py.insert_personality()
+                        non_json_string = ('\n'.join(f'''\n{author}\'s
+                                          {trait} is: {percentile}
+                                          '''.format(trait, percentile) for
+                                          trait, percentile
+                                          in dictionary.items()))
+                        comment.reply(non_json_string)
+                    else:
+                        print('didn\'t work!')
+                        continue
+                    # Key Error may be because a person didn't have enough comments
+                except KeyError:
+                    continue
+                
+        
+    pySQL.user.close
+   
+       
