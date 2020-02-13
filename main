@@ -1,23 +1,19 @@
 import praw
 import requests
 import json
-import pySQL
 import psycopg2
 
-# Establishing a connection to the SQL database via psycopg2
-
-connection = psycopg2.connect(user='username',
-                              password='password',
-                              port='5433',
-                              # if using a web service,
-                              # host link will be provided
-                              host='127.0.0.1',
-                              database='psycho')
+# Psycopg2 allows us to log into a postgresql database
+connection = psycopg2.connect(user='pgadmin username',
+                              password='pgadmin password',
+                              host='aws host link ',
+                              port='3343',
+                              database='database name')
 
 cursor = connection.cursor()
 
 
-class user_class():
+class user():
 
     def __init__(self, u, o, c, e, a, n):
         self.u = u.lower()
@@ -27,93 +23,100 @@ class user_class():
         self.a = a
         self.n = n
 
-    # inserts Watson's data into database
-    def insert_personality(self):
+    # Inserts Watson's user data into database
+    def insert_data(self):
         try:
             cursor.execute('SELECT VERSION();')
             cursor.execute('SELECT * FROM redditpsychometrics')
-            cursor.execute('''INSERT INTO
-                           redditpsychometrics(wopenness,
-                           wconscientiousness, wextraversion,
-                           wagreeableness, wneuroticism, username)
-                           VALUES ( {}, {}, {}, {}, {}, '{}')
-                           ON CONFLICT DO NOTHING;'''.format(self.o,
-                           self.c, self.e, self.a, self.n, self.u))
+            cursor.execute('''INSERT INTO redditpsychometrics(wopenness,
+                          wconscientiousness, wextraversion, wagreeableness,
+                          wneuroticism, username) VALUES ( {}, {}, {}, {},
+                          {}, '{}') ON CONFLICT DO NOTHING;'''.format(self.o,
+                          self.c, self.e, self.a, self.n, self.u))
             connection.commit()
 
         except (Exception, psycopg2.Error) as error:
             return error
-
+        
+    # Check if the user has already been added to the database
     def usercheck(self):
-        cursor.execute('''SELECT username FROM redditpsychometrics
-                      WHERE username = '{}'  '''.format(self.u))
+        cursor.execute('''SELECT username FROM redditpsychometrics WHERE
+                     username = '{}'  '''.format(self.u))
         retrieval = cursor.fetchall()
         return retrieval
 
+    # Close the connection when we're done
     def close():
         if (connection):
             cursor.close()
             connection.close()
 
-# Necessary if using AWS:
+
+# AWS handler. It tells AWS to activate the file.
 def handler(event, context):
-    main
+    print('The AWS handler worked!')
 
 
-# analyze is a function that takes a username and sends it to Watson's API to
-# be analyzed.
-    def analyze(username):
-        try:
-            headers = {
-                    'Content-Type': 'text/plain;charset=utf-8',
-                    'Accept': 'application/json',
-                      }
-
-            data = username.encode('utf-8')
-            response = requests.post('watson api',
-                                     headers=headers, data=data,
-                                     auth=('apikey', 'apikey'))
-            a = response.text
-            print(a)
-            return(a)
-        except Exception:
-            print(Exception)
+# Logs in to Watson 
+    def run(username):
+        headers = {
+        'Content-Type': 'text/plain;charset=utf-8',
+        'Accept': 'application/json'
+        }
+        data = username.encode('utf-8')
+        response = requests.post('API link', headers=headers, data=data,
+                                 auth=('<apikey', 'API KEY>'))
+        watson_response = response.text
+        return(watson_response)
 
     comment = praw.models.Comment
-
-# logs onto Reddit bot's account through praw's api
+    
+    
+    # Praw login
     reddit = praw.Reddit(client_id='',
                          client_secret='',
                          user_agent='',
                          password='',
                          username='')
 
-    # checks last 1000 comments from a username and collates them
+    # input username
     def comment_checker(username):
-        all_comments = ''
+        comment_string = ''
         user = reddit.redditor(str(username))
-        for com in user.comments.new(limit=None):
-            individual_comment = com.body
-            all_comments += individual_comment
-        return(all_comments)
+        for com in user.comments.new(limit=1000):
+            single_comment = com.body
+            comment_string += single_comment
+        return(comment_string)
 
-    # scrape all comments from the 25 newest comments in a subreddit
-    for sub in reddit.subreddit('testingground4bots').new('limit=25'):
+    # Scrapes a specific post on a subreddit
+    sub = reddit.submission(url= 'specific subreddit url')
 
-        sub.comments.replace_more()
-        comment_queue = sub.comments[:]  # Seed with top-level
-        while comment_queue:
-            comment = comment_queue.pop(0)
-            comment_queue.extend(comment.replies)
-            searchedphrase = comment.body.lower()
-            if '!analyzeme' in searchedphrase:
-                check = comment_checker(comment.author)
-                d = analyze(check)
-                a = json.loads(d)
+    # Searches all comments on a subreddit, looks for a searched phrase
+    # which activates the bot. Takes the author's name and prints it.
+    # Searches the database to ensure that the author's comment
+    # history isn't in the database, and the author hasn't already
+    # been analyzed
+    sub.comments.replace_more()
+    comment_queue = sub.comments[:]  # Seed with top-level
+    while comment_queue:
+        comment = comment_queue.pop(0)
+        author = str(comment.author).lower()
+        comment_queue.extend(comment.replies)
+        searchedphrase = comment.body.lower()
+        if 'spam I am' in searchedphrase:
+            print(author)
+            cursor.execute('''SELECT username FROM redditpsychometrics WHERE
+                           username = '{}'  '''.format(author))
+            ret = cursor.fetchall()
+            if ret == []:
+                print(author)
+                check = comment_checker(author)
+                author_checker = run(check)
+                # Grabs information from Watson
+                watson_json = json.loads(author_checker)
                 dictionary = {}
                 try:
-                    for item in a['personality']:
-
+                    for item in watson_json['personality']:
                         percentile = str(item['percentile'])
                         trait = str(item['trait_id'])
                         if 'conscientiousness' in trait:
@@ -127,31 +130,35 @@ def handler(event, context):
                         if 'openness' in trait:
                             trait = 'Openness'
                         dictionary[trait] = percentile
-                    author = comment.author
 
-                    py = user_class(str(author), dictionary['Openness'],
-                                    dictionary['Conscientiousness'],
-                                    dictionary['Extraversion'],
-                                    dictionary['Agreeableness'],
-                                    dictionary['Neuroticism'])
+                    py = user(str(author), dictionary['Openness'],
+                              dictionary['Conscientiousness'],
+                              dictionary['Extraversion'],
+                              dictionary['Agreeableness'],
+                              dictionary['Neuroticism'])
 
+                    # If the username doesn't appear in the database, print
+                    # the user's information
                     if py.usercheck() == []:
                         print(str(py.usercheck))
-                        py.insert_personality()
+                        py.insert_data()
                         non_json_string = ('\n'.join(f'''\n{author}\'s
                                           {trait} is: {percentile}
-                                          '''.format(trait, percentile) for
-                                          trait, percentile
-                                          in dictionary.items()))
+                                          '''.format(trait, percentile)
+                                          for trait, percentile in
+                                          dictionary.items()))
+
                         comment.reply(non_json_string)
-                    else:
-                        print('didn\'t work!')
-                        continue
-                    # Key Error may be because a person didn't have enough comments
+                  
                 except KeyError:
+                    print(str(KeyError))
                     continue
-                
-        
-    pySQL.user.close
-   
-       
+
+            else:
+                print('did not work for', comment.author)
+                continue
+    user.close()
+# =============================================================================
+## If testing this code locally, activate this command
+# handler('ev','d')
+# =============================================================================
